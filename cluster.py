@@ -10,7 +10,7 @@ from sklearn.externals import joblib
 import sys,os,re,time
 import argparse
 
-def get_args():
+def _get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--sample', required=True, help='path to sample file')
     parser.add_argument('-c', '--csv',  help='path to csv file as a result')
@@ -86,7 +86,7 @@ def make_X(df):
     draw3d(list(len_zs),list(ratio_zs), z=list(strsum_zs), xlabel='len_zs', ylabel='ratio_zs', zlabel='strsum_zs')
     X = np.concatenate(([len_zs],[ratio_zs],[strsum_zs]), axis=0).T
     #X = np.concatenate(([ratio_zs]), axis=0).T
-    df['len_zscore'], df['ratio_zscore'] = len_zs, ratio_zs 
+    df['len_zscore'], df['ratio_zscore'],df['strsum_zs'] = len_zs, ratio_zs, strsum_zs
     return X,df
 
 def train_check(X, max_clusters):
@@ -115,10 +115,10 @@ def train(X, n_clusters, df):
     df["label"] = kmeans.labels_
     return df, kmeans
 
+TXT_REF = '[YYYY][INFO] abcdefghjklmnopqrstuvwxyz0123456789'
 
 if __name__ == '__main__':
-    TXT_REF = '[YYYY][INFO] abcdefghjklmnopqrstuvwxyz0123456789'
-    args = get_args()
+    args = _get_args()
     print(args)
     
     print('\n----------------------------------------------------------------')
@@ -137,7 +137,7 @@ if __name__ == '__main__':
     log_df, kmeans = train(X, best_clusters, log_df)
     print("完成！") 
 
-    log_df.to_csv(args.csv, sep=',', header=False, index=False)
+    log_df.to_csv(args.csv, sep=',', header=True, index=False)
     print("结果存入文件："+args.csv)
     joblib.dump(kmeans, args.pkl)
     print("kmean存入"+args.pkl)
