@@ -7,7 +7,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
-import sys,os,re,time
+import sys,re
 import argparse
 
 def _get_args():
@@ -16,10 +16,12 @@ def _get_args():
     parser.add_argument('-c', '--csv',  help='path to csv file as a result')
     parser.add_argument('-p', '--pkl', help='path to pkl file')
     parser.add_argument('-m', '--maxclusters', help='max clusters')
+    parser.add_argument('-H', '--host', help='host ip for database', default='localhost')
+    parser.add_argument('-P', '--port', help='port for database', default='8086')
     args = parser.parse_args()
     if args.csv == None: args.csv = args.sample + '.csv'
     if args.pkl == None: args.pkl = args.sample + '.pkl'
-    if args.maxclusters == None: args.maxclusters = 15
+    if args.maxclusters == None: args.maxclusters = 10
     return args
 
 
@@ -34,8 +36,9 @@ def draw(x,y, xlabel='x', ylabel='y',line=True, scatter=True, grid=True):
     plt.show()
     
 def draw3d(x,y,z, xlabel='x', ylabel='y',zlabel='z'):
-    plt.figure(figsize=[8,8])
-    ax = plt.subplot(111,projection='3d')
+    fig = plt.figure(figsize=[8,8])
+    #ax = plt.subplot(111,projection='3d')
+    ax = Axes3D(fig)
     ax.scatter(x, y, z, marker=".")
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -77,7 +80,7 @@ def extract_feature(df, txt_ref):
     return df
 
 def make_X(df):
-    '''抽取有用的特征，对特征值做标准化处理'''
+    '''抽取有用的特征，对特征值做标准化处理，生成一个特征矩阵X，作为算法的数据集'''
     len_zs = zscore(df['message.len'])
     ratio_zs = zscore(df['Levenshtein.ratio'])
     strsum_zs = zscore(df['string.sum'])
@@ -115,6 +118,24 @@ def train(X, n_clusters, df):
     df["label"] = kmeans.labels_
     return df, kmeans
 
+
+def save_to_database(dataframe, user='root',password='root', host='localhost', port=8086):
+    '''
+    存pandas.DataFrame类型数据到influxdb数据库中
+    '''
+    from influxdb import DataFrameClient
+    import time
+    dbname='log_label'
+    print("连接数据库,host={}, port={}, dbname={}, user={}".format(host, port, user, password, dbname))
+    client = DataFrameClient(host, port, user, password, dbname) 
+#   print("Create database: " + dbname)
+#   client.create_database(dbname)
+    tablename='sample_label' + time.strftime("_%Y%m%d_%H%M%S", time.localtime())   
+    df = pd.DataFrame(data=np.array(dataframe), 
+                       index=pd.date_range(start=time.strftime("%Y-%m-%d", time.localtime()),periods=len(dataframe), freq='H'))    
+    client.write_points(df, tablename, protocol='line')
+    client.close()
+
 TXT_REF = '[YYYY][INFO] abcdefghjklmnopqrstuvwxyz0123456789'
 
 if __name__ == '__main__':
@@ -139,5 +160,16 @@ if __name__ == '__main__':
 
     log_df.to_csv(args.csv, sep=',', header=True, index=False)
     print("结果存入文件："+args.csv)
+    
+    if args.host!=None:
+        try:
+            print("save to database")
+            log_df["log"] = log_df["log"].str.replace('"', r'\"' )
+            save_to_database(log_df, host=args.host, port=args.port)    
+        except Exception as e:
+            print(str(e))
+
+    
     joblib.dump(kmeans, args.pkl)
     print("kmean存入"+args.pkl)
+    
