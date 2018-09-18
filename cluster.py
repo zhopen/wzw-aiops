@@ -7,7 +7,9 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
-import sys,re
+import sys
+import re
+import os
 import argparse
 
 def _get_args():
@@ -18,10 +20,12 @@ def _get_args():
     parser.add_argument('-m', '--maxclusters', help='max clusters')
     parser.add_argument('-H', '--host', help='host ip for database', default='localhost')
     parser.add_argument('-P', '--port', help='port for database', default='8086')
+    parser.add_argument('-u', '--user', help='user name for database', default='root')
+    parser.add_argument('-w', '--password', help='password for database', default='root')
     args = parser.parse_args()
     if args.csv == None: args.csv = args.sample + '.csv'
     if args.pkl == None: args.pkl = args.sample + '.pkl'
-    if args.maxclusters == None: args.maxclusters = 10
+    if args.maxclusters == None: args.maxclusters = 15
     return args
 
 
@@ -60,14 +64,16 @@ def inputnum(comment, ifnotnum='continue'):
             else: 
                 continue
 
-def zscore(a):
-    return (a - a.mean()) / a.std()          #z-score标准化
+def zscore(a, mean=None, std=None):
+    if mean==None: mean = a.mean()
+    if std==None:  std = a.std()    
+    return (a - mean) / std          #z-score标准化
 
 def str_sum(str):
     b = bytes(str,encoding="utf-8")
     return sum(b)
 
-def import_sample(sample_file):
+def import_sample_json(sample_file):
     df = pd.read_json(sample_file, lines=True)
     df["log"] = df['log'].str.strip()
     return df
@@ -76,20 +82,21 @@ def extract_feature(df, txt_ref):
     '''抽取特征和构建特征矩阵：ratio，len'''
     df['message.len'] = df[u'log'].apply(lambda x:len(x))
     df['Levenshtein.ratio'] = df[u'log'].apply(lambda x:Levenshtein.ratio(txt_ref,x))
-    df['string.sum'] = df[u'log'].str.replace(re.compile('^\d{4}-\d{2}-\d{2} \d+:\d+:\d+.\d+'),"").apply(str_sum)
+    #df['string.sum'] = df[u'log'].str.replace(re.compile('^\d{4}-\d{2}-\d{2} \d+:\d+:\d+.\d+'),"").apply(str_sum)
     return df
 
-def make_X(df):
+def make_X(df, len_mean=None, len_std=None, ratio_mean=None, ratio_std=None, isdraw=False):
     '''抽取有用的特征，对特征值做标准化处理，生成一个特征矩阵X，作为算法的数据集'''
-    len_zs = zscore(df['message.len'])
-    ratio_zs = zscore(df['Levenshtein.ratio'])
-    strsum_zs = zscore(df['string.sum'])
-    draw(list(len_zs),list(ratio_zs), xlabel='len_zs', ylabel='ratio_zs', line=False, grid=False)
-    draw(list(len_zs),list(strsum_zs), xlabel='len_zs', ylabel='strsum_zs', line=False, grid=False)
-    draw3d(list(len_zs),list(ratio_zs), z=list(strsum_zs), xlabel='len_zs', ylabel='ratio_zs', zlabel='strsum_zs')
-    X = np.concatenate(([len_zs],[ratio_zs],[strsum_zs]), axis=0).T
+    len_zs = zscore(df['message.len'], len_mean, len_std)
+    ratio_zs = zscore(df['Levenshtein.ratio'], ratio_mean, ratio_std)
+#    strsum_zs = zscore(df['string.sum'])
+    if draw == True:
+        draw(list(len_zs),list(ratio_zs), xlabel='len_zs', ylabel='ratio_zs', line=False, grid=False)
+#    draw(list(len_zs),list(strsum_zs), xlabel='len_zs', ylabel='strsum_zs', line=False, grid=False)
+#    draw3d(list(len_zs),list(ratio_zs), z=list(strsum_zs), xlabel='len_zs', ylabel='ratio_zs', zlabel='strsum_zs')
+    X = np.concatenate(([len_zs],[ratio_zs]), axis=0).T
     #X = np.concatenate(([ratio_zs]), axis=0).T
-    df['len_zscore'], df['ratio_zscore'],df['strsum_zs'] = len_zs, ratio_zs, strsum_zs
+    df['len_zscore'], df['ratio_zscore'] = len_zs, ratio_zs
     return X,df
 
 def train_check(X, max_clusters):
@@ -125,19 +132,46 @@ def save_to_database(dataframe, user='root',password='root', host='localhost', p
     '''
     from influxdb import DataFrameClient
     import time
-    dbname='log_label'
+    dbname='aiops'
     print("连接数据库,host={}, port={}, dbname={}, user={}".format(host, port, user, password, dbname))
     client = DataFrameClient(host, port, user, password, dbname) 
 #   print("Create database: " + dbname)
 #   client.create_database(dbname)
     tablename='sample_label' + time.strftime("_%Y%m%d_%H%M%S", time.localtime())   
     df = pd.DataFrame(data=np.array(dataframe), 
-                       index=pd.date_range(start=time.strftime("%Y-%m-%d", time.localtime()),periods=len(dataframe), freq='H'))    
+                       index=pd.date_range(start=time.strftime("%Y-%m-%d", time.localtime()),periods=len(dataframe), freq='ms'))    
     client.write_points(df, tablename, protocol='line')
     client.close()
+    
+def save_to_db(log_df, user='root',password='root', host='localhost', port=8086, table_name="demo",batch_size=1000):
+    from influxdb import InfluxDBClient
+    client = InfluxDBClient(host, port, user, password, 'log_label')
+    #client.create_database('example')     
+    for n in range(len(log_df)//batch_size+1):
+        df = log_df[n*batch_size:(n+1)*batch_size]
+        json_bodys = []
+        for i in range(len(df)):
+            json_body = {
+                    "measurement": table_name,
+                    "tags": {
+                        "id": 0,
+                        "label": 0
+                    },
+                    #"time": "2009-11-10T23:01:00Z",
+                    "fields": {
+                        "log":""
+                    }
+                }
+            pos = n*batch_size+i
+            json_body["tags"]["id"] = pos
+            json_body["tags"]["label"] = df['label'][pos]
+            json_body["fields"]["log"] = df['log'][pos].replace('"', '\"')
+            json_bodys.append(json_body)
+        client.write_points(json_bodys)     
 
 TXT_REF = '[YYYY][INFO] abcdefghjklmnopqrstuvwxyz0123456789'
-
+zscore_len =  0
+zscore_ratio = 0
 if __name__ == '__main__':
     args = _get_args()
     print(args)
@@ -145,11 +179,11 @@ if __name__ == '__main__':
     print('\n----------------------------------------------------------------')
     print("读入样本文件数据："+args.sample)
     
-    log_df = import_sample(args.sample)
+    log_df = import_sample_json(args.sample)
     print('提取特征。参考文本：' + TXT_REF)
     
     log_df = extract_feature(log_df, TXT_REF)
-    X, log_df = make_X(log_df)
+    X, log_df = make_X(log_df, isdraw=True)
     print('正在训练/评估性能最佳的分类数...')
     best_clusters = train_check(X,args.maxclusters)
     print('最佳分类数为：' + str(best_clusters))
@@ -165,11 +199,16 @@ if __name__ == '__main__':
         try:
             print("save to database")
             log_df["log"] = log_df["log"].str.replace('"', r'\"' )
-            save_to_database(log_df, host=args.host, port=args.port)    
+            save_to_db(log_df, host=args.host, port=args.port, table_name=os.path.basename(args.sample),
+                       user=args.user, password=args.password)    
         except Exception as e:
-            print(str(e))
+            print("Failed to save database. \n" + str(e))
 
-    
+    setattr(kmeans, "len_mean", log_df["message.len"].mean())
+    setattr(kmeans, "len_std", log_df["message.len"].std())
+    setattr(kmeans, "ratio_mean", log_df["Levenshtein.ratio"].mean())
+    setattr(kmeans, "ratio_std", log_df["Levenshtein.ratio"].std())
+       
     joblib.dump(kmeans, args.pkl)
     print("kmean存入"+args.pkl)
     

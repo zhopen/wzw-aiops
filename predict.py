@@ -21,7 +21,7 @@ if __name__ == '__main__':
     args = _get_args()
     
     km = joblib.load(args.pkl)
-    df = cluster.import_sample(args.sample)
+    df = cluster.import_sample_json(args.sample)
     df = cluster.extract_feature(df, cluster.TXT_REF)
     X,df = cluster.make_X(df)
     labels = km.predict(X)
