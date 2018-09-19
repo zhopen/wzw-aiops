@@ -5,10 +5,10 @@ import Levenshtein
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
+#from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
 import sys
-import re
+#import re
 import os
 import argparse
 
@@ -25,7 +25,7 @@ def _get_args():
     args = parser.parse_args()
     if args.csv == None: args.csv = args.sample + '.csv'
     if args.pkl == None: args.pkl = args.sample + '.pkl'
-    if args.maxclusters == None: args.maxclusters = 15
+    if args.maxclusters == None: args.maxclusters = 20
     return args
 
 
@@ -101,7 +101,7 @@ def make_X(df, len_mean=None, len_std=None, ratio_mean=None, ratio_std=None, isd
 
 def train_check(X, max_clusters):
     '''聚类分析（Kmean算法），然后通过silhouette_score算法评估出最佳的分类数'''
-    k,distance, sc_scores = range(2,max_clusters+1),[], []
+    k,distance, scores = range(2,max_clusters+1),[], []
     for n_clusters in k:
         cls = KMeans(n_clusters).fit(X)
         distance_sum = 0
@@ -110,14 +110,13 @@ def train_check(X, max_clusters):
             members = X[group,:]     
             distance_sum += (abs(members - cls.cluster_centers_[i])).sum() #同一标签的所有样本与质心的manhattan distance的和
         distance.append(distance_sum)
-        #k.append(n_clusters)
-        sc_score = silhouette_score(X,labels=cls.labels_, metric='euclidean')
-        sc_scores.append(sc_score)
-    best_clusters_idx = sc_scores.index(max(sc_scores))
+        score = cls.score(X) #silhouette_score(X,labels=cls.labels_, metric='euclidean')
+        scores.append(score)
+    best_clusters_idx = scores.index(max(scores))
     print("K values（最佳分类数量）:", str(k[best_clusters_idx]))
     print("Distance = ", str(distance[best_clusters_idx]))
     draw(k, distance, xlabel='k', ylabel='distance')
-    draw(k, sc_scores, xlabel='k', ylabel='silhouette_score')
+    draw(k, scores, xlabel='k', ylabel='score')
     return k[best_clusters_idx]
 
 def train(X, n_clusters, df):
