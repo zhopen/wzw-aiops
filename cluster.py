@@ -2,8 +2,6 @@
 import pandas as pd
 import numpy as np
 import Levenshtein
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 #from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
@@ -22,6 +20,7 @@ def _get_args():
     parser.add_argument('-P', '--port', help='port for database', default='8086')
     parser.add_argument('-u', '--user', help='user name for database', default='root')
     parser.add_argument('-w', '--password', help='password for database', default='root')
+    parser.add_argument('-d', '--draw', help='enable drawing', default='false', action="store_true")
     args = parser.parse_args()
     if args.csv == None: args.csv = args.sample + '.csv'
     if args.pkl == None: args.pkl = args.sample + '.pkl'
@@ -30,6 +29,7 @@ def _get_args():
 
 
 def draw(x,y, xlabel='x', ylabel='y',line=True, scatter=True, grid=True):
+    import matplotlib.pyplot as plt
     plt.figure(figsize=[8,8])
     ax = plt.subplot(111)
     if scatter == True: ax.scatter(x, y, marker=",",s=2)
@@ -40,6 +40,8 @@ def draw(x,y, xlabel='x', ylabel='y',line=True, scatter=True, grid=True):
     plt.show()
     
 def draw3d(x,y,z, xlabel='x', ylabel='y',zlabel='z'):
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
     fig = plt.figure(figsize=[8,8])
     #ax = plt.subplot(111,projection='3d')
     ax = Axes3D(fig)
@@ -99,7 +101,7 @@ def make_X(df, len_mean=None, len_std=None, ratio_mean=None, ratio_std=None, isd
     df['len_zscore'], df['ratio_zscore'] = len_zs, ratio_zs
     return X,df
 
-def train_check(X, max_clusters):
+def train_check(X, max_clusters, isdraw=False):
     '''聚类分析（Kmean算法），然后通过silhouette_score算法评估出最佳的分类数'''
     k,distance, scores = range(2,max_clusters+1),[], []
     for n_clusters in k:
@@ -115,8 +117,9 @@ def train_check(X, max_clusters):
     best_clusters_idx = scores.index(max(scores))
     print("K values（最佳分类数量）:", str(k[best_clusters_idx]))
     print("Distance = ", str(distance[best_clusters_idx]))
-    draw(k, distance, xlabel='k', ylabel='distance')
-    draw(k, scores, xlabel='k', ylabel='score')
+    if isdraw==True:
+        draw(k, distance, xlabel='k', ylabel='distance')
+        draw(k, scores, xlabel='k', ylabel='score')
     return k[best_clusters_idx]
 
 def train(X, n_clusters, df):
@@ -182,9 +185,9 @@ if __name__ == '__main__':
     print('提取特征。参考文本：' + TXT_REF)
     
     log_df = extract_feature(log_df, TXT_REF)
-    X, log_df = make_X(log_df, isdraw=True)
+    X, log_df = make_X(log_df, isdraw=args.draw)
     print('正在训练/评估性能最佳的分类数...')
-    best_clusters = train_check(X,args.maxclusters)
+    best_clusters = train_check(X,args.maxclusters, isdraw=args.draw)
     print('最佳分类数为：' + str(best_clusters))
     
     print('正在分类数据...')
