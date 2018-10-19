@@ -2,11 +2,13 @@
 import pandas as pd
 import numpy as np
 import Levenshtein
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 #from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
 import sys
-import re
+#import re
 import os
 import argparse
 
@@ -15,21 +17,19 @@ def _get_args():
     parser.add_argument('-s', '--sample', required=True, help='path to sample file')
     parser.add_argument('-c', '--csv',  help='path to csv file as a result')
     parser.add_argument('-p', '--pkl', help='path to pkl file')
-    parser.add_argument('-m', '--maxclusters', help='max clusters',type=int,default=20)
+    parser.add_argument('-m', '--maxclusters', help='max clusters')
     parser.add_argument('-H', '--host', help='host ip for database', default='localhost')
     parser.add_argument('-P', '--port', help='port for database', default='8086')
     parser.add_argument('-u', '--user', help='user name for database', default='root')
     parser.add_argument('-w', '--password', help='password for database', default='root')
-    parser.add_argument('-d', '--draw', help='enable drawing', default='false', action="store_true")
     args = parser.parse_args()
     if args.csv == None: args.csv = args.sample + '.csv'
     if args.pkl == None: args.pkl = args.sample + '.pkl'
-    
+    if args.maxclusters == None: args.maxclusters = 20
     return args
 
 
 def draw(x,y, xlabel='x', ylabel='y',line=True, scatter=True, grid=True):
-    import matplotlib.pyplot as plt
     plt.figure(figsize=[8,8])
     ax = plt.subplot(111)
     if scatter == True: ax.scatter(x, y, marker=",",s=2)
@@ -40,8 +40,6 @@ def draw(x,y, xlabel='x', ylabel='y',line=True, scatter=True, grid=True):
     plt.show()
     
 def draw3d(x,y,z, xlabel='x', ylabel='y',zlabel='z'):
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
     fig = plt.figure(figsize=[8,8])
     #ax = plt.subplot(111,projection='3d')
     ax = Axes3D(fig)
@@ -82,28 +80,26 @@ def import_sample_json(sample_file):
 
 def extract_feature(df, txt_ref):   
     '''抽取特征和构建特征矩阵：ratio，len'''
-    df[u'log'].replace(re.compile("\d+"), "x", inplace=True)
-    df = pd.DataFrame(df['log'].drop_duplicates())
-    df['message.len'] = df['log'].apply(lambda x:len(x))
-    df['Levenshtein.ratio'] = df['log'].apply(lambda x:Levenshtein.ratio(txt_ref,x))
-    #df['string.sum'] = log.apply(str_sum)
+    df['message.len'] = df[u'log'].apply(lambda x:len(x))
+    df['Levenshtein.ratio'] = df[u'log'].apply(lambda x:Levenshtein.ratio(txt_ref,x))
+    #df['string.sum'] = df[u'log'].str.replace(re.compile('^\d{4}-\d{2}-\d{2} \d+:\d+:\d+.\d+'),"").apply(str_sum)
     return df
 
 def make_X(df, len_mean=None, len_std=None, ratio_mean=None, ratio_std=None, isdraw=False):
     '''抽取有用的特征，对特征值做标准化处理，生成一个特征矩阵X，作为算法的数据集'''
     len_zs = zscore(df['message.len'], len_mean, len_std)
     ratio_zs = zscore(df['Levenshtein.ratio'], ratio_mean, ratio_std)
-    #strsum_zs = zscore(df['string.sum'])
-    if isdraw == True:
+#    strsum_zs = zscore(df['string.sum'])
+    if draw == True:
         draw(list(len_zs),list(ratio_zs), xlabel='len_zs', ylabel='ratio_zs', line=False, grid=False)
 #    draw(list(len_zs),list(strsum_zs), xlabel='len_zs', ylabel='strsum_zs', line=False, grid=False)
 #    draw3d(list(len_zs),list(ratio_zs), z=list(strsum_zs), xlabel='len_zs', ylabel='ratio_zs', zlabel='strsum_zs')
     X = np.concatenate(([len_zs],[ratio_zs]), axis=0).T
+    #X = np.concatenate(([ratio_zs]), axis=0).T
     df['len_zscore'], df['ratio_zscore'] = len_zs, ratio_zs
-    #df['strsum_zs'] = strsum_zs
     return X,df
 
-def train_check(X, max_clusters, isdraw=False):
+def train_check(X, max_clusters):
     '''聚类分析（Kmean算法），然后通过silhouette_score算法评估出最佳的分类数'''
     k,distance, scores = range(2,max_clusters+1),[], []
     for n_clusters in k:
@@ -119,9 +115,8 @@ def train_check(X, max_clusters, isdraw=False):
     best_clusters_idx = scores.index(max(scores))
     print("K values（最佳分类数量）:", str(k[best_clusters_idx]))
     print("Distance = ", str(distance[best_clusters_idx]))
-    if isdraw==True:
-        draw(k, distance, xlabel='k', ylabel='distance')
-        draw(k, scores, xlabel='k', ylabel='score')
+    draw(k, distance, xlabel='k', ylabel='distance')
+    draw(k, scores, xlabel='k', ylabel='score')
     return k[best_clusters_idx]
 
 def train(X, n_clusters, df):
@@ -187,9 +182,9 @@ if __name__ == '__main__':
     print('提取特征。参考文本：' + TXT_REF)
     
     log_df = extract_feature(log_df, TXT_REF)
-    X, log_df = make_X(log_df, isdraw=args.draw)
+    X, log_df = make_X(log_df, isdraw=True)
     print('正在训练/评估性能最佳的分类数...')
-    best_clusters = train_check(X,args.maxclusters, isdraw=args.draw)
+    best_clusters = train_check(X,args.maxclusters)
     print('最佳分类数为：' + str(best_clusters))
     
     print('正在分类数据...')
@@ -212,8 +207,7 @@ if __name__ == '__main__':
     setattr(kmeans, "len_std", log_df["message.len"].std())
     setattr(kmeans, "ratio_mean", log_df["Levenshtein.ratio"].mean())
     setattr(kmeans, "ratio_std", log_df["Levenshtein.ratio"].std())
-#    setattr(kmeans, "sum_mean", log_df["string.sum"].mean())
-#    setattr(kmeans, "sum_std", log_df["string.sum"].std())    
+       
     joblib.dump(kmeans, args.pkl)
     print("kmean存入"+args.pkl)
     

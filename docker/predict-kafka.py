@@ -16,12 +16,11 @@ from kafka import KafkaConsumer
 def _get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--pkl',  required=True, help='path to pkl file')  
-    parser.add_argument('-H', '--host', help='host ip for database')
+    parser.add_argument('-H', '--host', help='host ip for database', default='localhost')
     parser.add_argument('-P', '--port', help='port for database', default='8086')
     parser.add_argument('-u', '--user', help='user name for database', default='root')
     parser.add_argument('-w', '--password', help='password for database', default='root')    
     parser.add_argument('-s', '--source', help='broker that data is from,like kafka', default='localhost:9092')    
-    parser.add_argument('-t', '--topic', required=True, help='topic from kafka')
     args = parser.parse_args()
     return args
 
@@ -63,7 +62,7 @@ if __name__ == '__main__':
     print("ratio_mean=", model.ratio_mean)    
     
     print("start")
-    consumer = KafkaConsumer(args.topic, bootstrap_servers=[args.source])
+    consumer = KafkaConsumer('topic1', bootstrap_servers=[args.source])
     print("receiving")
     for msg in consumer:
         print (msg.value.decode())
@@ -80,11 +79,10 @@ if __name__ == '__main__':
         df["label"] = labels
         
         try:
-            if args.host != None:
-                print("save to database")
-                df["log"] = df["log"].str.replace('"', r'\"' )
-                cluster.save_to_db(df, host=args.host, port=args.port, table_name="log_cluster",
-                                   user=args.user, password=args.password)    
+            print("save to database")
+            df["log"] = df["log"].str.replace('"', r'\"' )
+            cluster.save_to_db(df, host=args.host, port=args.port, table_name="log_cluster",
+                       user=args.user, password=args.password)    
             print(df)
         except Exception as e:
             print(str(e))
