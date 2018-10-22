@@ -5,6 +5,7 @@ import Levenshtein
 from sklearn.cluster import KMeans
 #from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
+from sklearn import preprocessing
 import sys
 import re
 import os
@@ -24,7 +25,6 @@ def _get_args():
     args = parser.parse_args()
     if args.csv == None: args.csv = args.sample + '.csv'
     if args.pkl == None: args.pkl = args.sample + '.pkl'
-    
     return args
 
 
@@ -51,30 +51,6 @@ def draw3d(x,y,z, xlabel='x', ylabel='y',zlabel='z'):
     ax.set_zlabel(zlabel)
     plt.show()
     
-def inputnum(comment, ifnotnum='continue'):
-    while True:
-        str = ""
-        try: 
-            str = input(comment)
-            return  int(str)
-        except: 
-            if ifnotnum == 'exit': 
-                sys.exit()
-            elif ifnotnum == 'break':
-                print("bbbb")
-                return None
-            else: 
-                continue
-
-def zscore(a, mean=None, std=None):
-    if mean==None: mean = a.mean()
-    if std==None:  std = a.std()    
-    return (a - mean) / std          #z-score标准化
-
-def str_sum(str):
-    b = bytes(str,encoding="utf-8")
-    return sum(b)
-
 def import_sample_json(sample_file):
     df = pd.read_json(sample_file, lines=True)
     df["log"] = df['log'].str.strip()
@@ -84,24 +60,19 @@ def extract_feature(df, txt_ref):
     '''抽取特征和构建特征矩阵：ratio，len'''
     df[u'log'].replace(re.compile("\d+"), "x", inplace=True)
     df = pd.DataFrame(df['log'].drop_duplicates())
+    df = df.reset_index(drop=True)
     df['message.len'] = df['log'].apply(lambda x:len(x))
     df['Levenshtein.ratio'] = df['log'].apply(lambda x:Levenshtein.ratio(txt_ref,x))
     #df['string.sum'] = log.apply(str_sum)
     return df
 
-def make_X(df, len_mean=None, len_std=None, ratio_mean=None, ratio_std=None, isdraw=False):
-    '''抽取有用的特征，对特征值做标准化处理，生成一个特征矩阵X，作为算法的数据集'''
-    len_zs = zscore(df['message.len'], len_mean, len_std)
-    ratio_zs = zscore(df['Levenshtein.ratio'], ratio_mean, ratio_std)
-    #strsum_zs = zscore(df['string.sum'])
-    if isdraw == True:
-        draw(list(len_zs),list(ratio_zs), xlabel='len_zs', ylabel='ratio_zs', line=False, grid=False)
-#    draw(list(len_zs),list(strsum_zs), xlabel='len_zs', ylabel='strsum_zs', line=False, grid=False)
-#    draw3d(list(len_zs),list(ratio_zs), z=list(strsum_zs), xlabel='len_zs', ylabel='ratio_zs', zlabel='strsum_zs')
-    X = np.concatenate(([len_zs],[ratio_zs]), axis=0).T
-    df['len_zscore'], df['ratio_zscore'] = len_zs, ratio_zs
-    #df['strsum_zs'] = strsum_zs
-    return X,df
+def make_X(df):
+    X_train = np.array(df.loc[:, ['message.len', 'Levenshtein.ratio']])
+    scaler = preprocessing.StandardScaler().fit(X_train)
+    X_scaled  = scaler.transform(X_train)   
+    df = pd.concat([df, pd.DataFrame(X_scaled,columns=['len_zs', 'ratio_zs'])], axis=1)
+    return df, scaler
+    
 
 def train_check(X, max_clusters, isdraw=False):
     '''聚类分析（Kmean算法），然后通过silhouette_score算法评估出最佳的分类数'''
@@ -128,24 +99,6 @@ def train(X, n_clusters, df):
     kmeans = KMeans(n_clusters,max_iter=30,n_init=3).fit(X)
     df["label"] = kmeans.labels_
     return df, kmeans
-
-
-def save_to_database(dataframe, user='root',password='root', host='localhost', port=8086):
-    '''
-    存pandas.DataFrame类型数据到influxdb数据库中
-    '''
-    from influxdb import DataFrameClient
-    import time
-    dbname='aiops'
-    print("连接数据库,host={}, port={}, dbname={}, user={}".format(host, port, user, password, dbname))
-    client = DataFrameClient(host, port, user, password, dbname) 
-#   print("Create database: " + dbname)
-#   client.create_database(dbname)
-    tablename='sample_label' + time.strftime("_%Y%m%d_%H%M%S", time.localtime())   
-    df = pd.DataFrame(data=np.array(dataframe), 
-                       index=pd.date_range(start=time.strftime("%Y-%m-%d", time.localtime()),periods=len(dataframe), freq='ms'))    
-    client.write_points(df, tablename, protocol='line')
-    client.close()
     
 def save_to_db(log_df, user='root',password='root', host='localhost', port=8086, table_name="demo",batch_size=1000):
     from influxdb import InfluxDBClient
@@ -187,13 +140,15 @@ if __name__ == '__main__':
     print('提取特征。参考文本：' + TXT_REF)
     
     log_df = extract_feature(log_df, TXT_REF)
-    X, log_df = make_X(log_df, isdraw=args.draw)
+    log_df,scaler = make_X(log_df)
+    
+    
     print('正在训练/评估性能最佳的分类数...')
-    best_clusters = train_check(X,args.maxclusters, isdraw=args.draw)
+    best_clusters = train_check(np.array(log_df.loc[:, ['len_zs', 'ratio_zs']]),args.maxclusters, isdraw=args.draw)
     print('最佳分类数为：' + str(best_clusters))
     
     print('正在分类数据...')
-    log_df, kmeans = train(X, best_clusters, log_df)
+    log_df, kmeans = train(np.array(log_df.loc[:, ['len_zs', 'ratio_zs']]), best_clusters, log_df)
     print("完成！") 
 
     log_df.to_csv(args.csv, sep=',', header=True, index=False)
@@ -208,12 +163,7 @@ if __name__ == '__main__':
         except Exception as e:
             print("Failed to save database. \n" + str(e))
 
-    setattr(kmeans, "len_mean", log_df["message.len"].mean())
-    setattr(kmeans, "len_std", log_df["message.len"].std())
-    setattr(kmeans, "ratio_mean", log_df["Levenshtein.ratio"].mean())
-    setattr(kmeans, "ratio_std", log_df["Levenshtein.ratio"].std())
-#    setattr(kmeans, "sum_mean", log_df["string.sum"].mean())
-#    setattr(kmeans, "sum_std", log_df["string.sum"].std())    
+    setattr(kmeans, "scaler", scaler)
     joblib.dump(kmeans, args.pkl)
     print("kmean存入"+args.pkl)
     
