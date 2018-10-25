@@ -30,14 +30,12 @@ if __name__ == '__main__':
     args = _get_args()  
     model = joblib.load(args.pkl)
     scaler = model.scaler
-    
- 
-    
+  
     print("start")
     consumer = KafkaConsumer(args.topic, bootstrap_servers=[args.source])
-    consumer = [
-            '{"log":"bird: BGP: Unexpected connect from unknown address 10.252.21.153 (port 27467)\n","stream":"stdout","hostname":"core-cmhadoop5-2","container_log_file":"calico-node-lmcsz_kube-system_calico-node-d3fcbf92d8c09506a8493dfffeedd730543ec50b4e31564921444ef65ebd0a71"}'
-            ]
+#    consumer = [
+#            '{"log":"bird: BGP: Unexpected connect from unknown address 10.252.21.153 (port 27467)\n","stream":"stdout","hostname":"core-cmhadoop5-2","container_log_file":"calico-node-lmcsz_kube-system_calico-node-d3fcbf92d8c09506a8493dfffeedd730543ec50b4e31564921444ef65ebd0a71"}'
+#            ]
     print("receiving")
     for msg in consumer:
         print (msg.value.decode())
