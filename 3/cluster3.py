@@ -63,7 +63,7 @@ def cluster(args):
     #load and preprocess dataset
     print("Loading sample file")
     df = pd.read_json(args.sample, lines=True)
-    data = reprocess_dataset(df['log'])
+    data = cleaning(df['log'])
     # transform
     X,vectorizer = transform(data,n_features=FEATURES)
     #train
@@ -95,7 +95,7 @@ def cluster(args):
 def score(args):
     '''测试选择最优参数'''
     df = pd.read_json(args.sample, lines=True)
-    data = reprocess_dataset(df['log'])
+    data = cleaning(df['log'])
     X,_ = transform(data,n_features=500)
     ks = []
     scores = []
@@ -117,9 +117,8 @@ def predict(args):
     model = joblib.load(args.pkl)
     json = args.json
     df = pd.read_json(json, lines=True)
-    data = reprocess_dataset(df['log'], drop_duplicates=False)
-    vectorizer = TfidfVectorizer(max_features=FEATURES, use_idf=True, vocabulary=model.vectorizer.vocabulary_)
-    X = vectorizer.fit_transform(data)
+    data = cleaning(df['log'], drop_duplicates=False)
+    X,_ = transform(data, n_features=FEATURES, vocabulary=model.vectorizer.vocabulary_)
     labels = model.predict(X)
     print("Label：{} --- {}".format(labels[0], df['log'][0]))
     
@@ -137,9 +136,8 @@ def predict_server(args):
         json_str = msg.value.decode()
         print (json_str)
         df = pd.read_json(json_str, lines=True)
-        data = reprocess_dataset(df['log'], drop_duplicates=False)
-        vectorizer = TfidfVectorizer(max_features=FEATURES, use_idf=True, vocabulary=model.vectorizer.vocabulary_)
-        X = vectorizer.fit_transform(data)
+        data = cleaning(df['log'], drop_duplicates=False)
+        X, _ = transform(data, n_features=FEATURES, vocabulary=model.vectorizer.vocabulary_)
         print("***********")
         labels = model.predict(X)
         df["label"] = labels
@@ -153,7 +151,7 @@ def predict_server(args):
         except Exception as e:
             print(str(e))    
 
-def reprocess_dataset(data, drop_duplicates=True):
+def cleaning(data, drop_duplicates=True):
     '''
     Param:
         df - pandas.serial
@@ -165,9 +163,9 @@ def reprocess_dataset(data, drop_duplicates=True):
     if drop_duplicates==True: data = data.drop_duplicates()
     return data
 
-def transform(dataset,n_features=500):
-    vectorizer = TfidfVectorizer(max_features=n_features, use_idf=True)
-    X = vectorizer.fit_transform(dataset)
+def transform(data,n_features=500, vocabulary=None):
+    vectorizer = TfidfVectorizer(max_features=n_features, use_idf=True, vocabulary=vocabulary)
+    X = vectorizer.fit_transform(data)
     return X,vectorizer
 
 def train(X,k=10):
@@ -184,16 +182,16 @@ def save_to_db(log_df, user='root',password='root', host='localhost', port=8086,
         json_bodys = []
         for i in range(len(df)):
             json_body = {
-                    "measurement": table_name,
-                    "tags": {
-                        "id": 0,
-                        "label": 0
-                    },
-                    #"time": "2009-11-10T23:01:00Z",
-                    "fields": {
-                        "log":""
-                    }
-                }
+                            "measurement": table_name,
+                            "tags": {
+                                "id": 0,
+                                "label": 0
+                            },
+                            #"time": "2009-11-10T23:01:00Z",
+                            "fields": {
+                                "log":""
+                            }
+                        }
             pos = n*batch_size+i
             json_body["tags"]["id"] = pos
             json_body["tags"]["label"] = df['label'][pos]
