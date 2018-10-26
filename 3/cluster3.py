@@ -6,15 +6,10 @@ Created on Mon Oct 22 17:22:43 2018
 """
 #-*- coding: utf8 -*-
 import pandas as pd
-import numpy as np
 from sklearn.cluster import KMeans
-#from sklearn.metrics import silhouette_score
 from sklearn.externals import joblib
-from sklearn import preprocessing
 #from sklearn.feature_extraction.text import CountVectorizer  
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.externals import joblib
-import matplotlib.pyplot as plt
 import argparse
 import re,os
 
@@ -30,8 +25,8 @@ def _get_args():
     parser_cluster.add_argument('-l', '--clusters', help='number of clusters',type=int,default=20)
     parser_cluster.add_argument('-H', '--dbhost', help='host ip for database', default='localhost')
     parser_cluster.add_argument('-P', '--dbport', help='port for database', default='8086')
-    parser_cluster.add_argument('-u', '--user', help='user name for database', default='root')
-    parser_cluster.add_argument('-w', '--password', help='password for database', default='root')
+    parser_cluster.add_argument('-u', '--dbuser', help='user name for database', default='root')
+    parser_cluster.add_argument('-w', '--dbpassword', help='password for database', default='root')
     parser_cluster.add_argument('-d', '--draw', help='enable drawing', default='false', action="store_true")
     parser_cluster.set_defaults(func=cluster)
     
@@ -46,12 +41,22 @@ def _get_args():
     parser_predict.add_argument('-p', '--pkl',  required=True, help='path to import pkl file')  
     parser_predict.add_argument('-H', '--dbhost', help='host ip for database')
     parser_predict.add_argument('-P', '--dbport', help='port for database', default='8086')
-    parser_predict.add_argument('-u', '--user', help='user name for database', default='root')
-    parser_predict.add_argument('-w', '--password', help='password for database', default='root')    
+    parser_predict.add_argument('-u', '--dbuser', help='user name for database', default='root')
+    parser_predict.add_argument('-w', '--dbpassword', help='password for database', default='root')    
+    parser_predict.add_argument('-j', '--json', help='json string')
+    parser_predict.add_argument('-c', '--csv',  help='path to csv file as a result')
+    parser_predict.set_defaults(func=predict)
+    
+    parser_predict = subparsers.add_parser('predictserver', help='cluster sample')   
+    parser_predict.add_argument('-p', '--pkl',  required=True, help='path to import pkl file')  
+    parser_predict.add_argument('-H', '--dbhost', help='host ip for database')
+    parser_predict.add_argument('-P', '--dbport', help='port for database', default='8086')
+    parser_predict.add_argument('-u', '--dbuser', help='user name for database', default='root')
+    parser_predict.add_argument('-w', '--dbpassword', help='password for database', default='root')    
     parser_predict.add_argument('-s', '--source', help='broker that data is from,like kafka', default='localhost:9092')    
     parser_predict.add_argument('-t', '--topic', help='topic from kafka')
     parser_predict.add_argument('-j', '--json', help='json string')
-    parser_predict.set_defaults(func=predict)
+    parser_predict.set_defaults(func=predict_server)
     
     args = parser.parse_args()
     return args
@@ -75,16 +80,16 @@ def cluster(args):
     df['label'] = kmeans.labels_
     try:
         df.to_csv(args.csv, sep=',', header=True, index=False)
+        print("Saved cluster result to file {}".format(args.csv))
     except Exception as e:
         print("failed to save csv file! Error:",str(e))
-    print("Saved cluster result to file {}".format(args.csv))
     #save to database
     if args.dbhost!=None:
         try:
             print("Saving result to database")
             df["log"] = df["log"].str.replace('"', r'\"' )
             save_to_db(df, host=args.dbhost, port=args.dbport, table_name=os.path.basename(args.sample),
-                       user=args.user, password=args.password)
+                       user=args.dbuser, password=args.dbpassword)
             print("Finished saving to database")
         except Exception as e:
             print("Failed to save database. Error:" + str(e))
@@ -105,6 +110,7 @@ def score(args):
         ks.append(i)
         scores.append(km.inertia_)
     if args.draw == True:
+        import matplotlib.pyplot as plt
         plt.figure(figsize=(8,4))
         plt.plot(ks,scores,label="inertia",color="red",linewidth=1)
         plt.xlabel("n_features")
@@ -117,10 +123,16 @@ def predict(args):
     model = joblib.load(args.pkl)
     json = args.json
     df = pd.read_json(json, lines=True)
-    data = cleaning(df['log'], drop_duplicates=False)
+    data = cleaning(df['log'].copy(), drop_duplicates=False)
     X,_ = transform(data, n_features=FEATURES, vocabulary=model.vectorizer.vocabulary_)
     labels = model.predict(X)
-    print("Label：{} --- {}".format(labels[0], df['log'][0]))
+    label_log =  pd.DataFrame()
+    label_log['label'] = labels
+    label_log['log'] = df['log']
+    for i in range(len(labels)):
+        print("{} --- {}".format(labels[i],df['log'][i]))
+    if args.csv!=None:
+        label_log.to_csv(args.csv, sep=',', header=True, index=False)
     
 def predict_server(args):
     from kafka import KafkaConsumer
@@ -136,31 +148,33 @@ def predict_server(args):
         json_str = msg.value.decode()
         print (json_str)
         df = pd.read_json(json_str, lines=True)
-        data = cleaning(df['log'], drop_duplicates=False)
+        data = cleaning(df['log'].copy(), drop_duplicates=False)
         X, _ = transform(data, n_features=FEATURES, vocabulary=model.vectorizer.vocabulary_)
         print("***********")
         labels = model.predict(X)
         df["label"] = labels
         try:
             print(df)
-            if args.host != None:
+            if args.dbhost != None:
                 print("save to database")
                 df["log"] = df["log"].str.replace('"', r'\"' )
-                cluster.save_to_db(df, host=args.host, port=args.port, table_name="log_cluster",
-                                   user=args.user, password=args.password)    
+                save_to_db(df, host=args.dbhost, port=args.dbport, table_name="label",
+                                   user=args.dbuser, password=args.dbpassword)    
         except Exception as e:
             print(str(e))    
 
 def cleaning(data, drop_duplicates=True):
     '''
     Param:
-        df - pandas.serial
+        df - pandas.serie
     Return:
         pandas.DataFrame type
     '''
     data.replace(re.compile("^\s+|\s+$"), "", inplace=True)
     data.replace(re.compile("\d+"), "", inplace=True)
-    if drop_duplicates==True: data = data.drop_duplicates()
+    if drop_duplicates==True: 
+        data = data.drop_duplicates()
+        data.reset_index(inplace=True, drop=True)
     return data
 
 def transform(data,n_features=500, vocabulary=None):
@@ -175,7 +189,7 @@ def train(X,k=10):
 
 def save_to_db(log_df, user='root',password='root', host='localhost', port=8086, table_name="demo",batch_size=1000):
     from influxdb import InfluxDBClient
-    client = InfluxDBClient(host, port, user, password, 'log_label')
+    client = InfluxDBClient(host, port, user, password, 'log_predict')
     #client.create_database('example')     
     for n in range(len(log_df)//batch_size+1):
         df = log_df[n*batch_size:(n+1)*batch_size]
