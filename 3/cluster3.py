@@ -2,18 +2,19 @@
 """
 Created on Mon Oct 22 17:22:43 2018
 
-@author: zhan
+@author: Zhang Han
+
+do clustering by TF-IDF and Kmean of scikit learn 
 """
 #-*- coding: utf8 -*-
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.externals import joblib
-#from sklearn.feature_extraction.text import CountVectorizer  
 from sklearn.feature_extraction.text import TfidfVectorizer
 import argparse
 import re,os
 
-FEATURES = 500
+MAX_FEATURES = 500
 
 def _get_args():
     parser = argparse.ArgumentParser()
@@ -70,7 +71,7 @@ def cluster(args):
     df = pd.read_json(args.sample, lines=True)
     data = cleaning(df['log'])
     # transform
-    X,vectorizer = transform(data,n_features=FEATURES)
+    X,vectorizer = transform(data,max_features=MAX_FEATURES)
     #train
     print("Training")
     kmeans = train(X, k=args.clusters)
@@ -101,7 +102,7 @@ def score(args):
     '''测试选择最优参数'''
     df = pd.read_json(args.sample, lines=True)
     data = cleaning(df['log'])
-    X,_ = transform(data,n_features=500)
+    X,_ = transform(data,max_features=500)
     ks = []
     scores = []
     for i in range(args.minclusters, args.maxclusters):        
@@ -113,8 +114,8 @@ def score(args):
         import matplotlib.pyplot as plt
         plt.figure(figsize=(8,4))
         plt.plot(ks,scores,label="inertia",color="red",linewidth=1)
-        plt.xlabel("n_features")
-        plt.ylabel("error")
+        plt.xlabel("Feature")
+        plt.ylabel("Error")
         plt.legend()
         plt.show()
 
@@ -124,7 +125,7 @@ def predict(args):
     json = args.json
     df = pd.read_json(json, lines=True)
     data = cleaning(df['log'].copy(), drop_duplicates=False)
-    X,_ = transform(data, n_features=FEATURES, vectorizer=model.vectorizer)
+    X,_ = transform(data, max_features=MAX_FEATURES, vectorizer=model.vectorizer)
     labels = model.predict(X)
     label_log =  pd.DataFrame()
     label_log['label'] = labels
@@ -149,7 +150,7 @@ def predict_server(args):
         print (json_str)
         df = pd.read_json(json_str, lines=True)
         data = cleaning(df['log'].copy(), drop_duplicates=False)
-        X, _ = transform(data, n_features=FEATURES, vectorizer=model.vectorizer)
+        X, _ = transform(data, max_features=MAX_FEATURES, vectorizer=model.vectorizer)
         print("***********")
         labels = model.predict(X)
         df["label"] = labels
@@ -177,9 +178,9 @@ def cleaning(data, drop_duplicates=True):
         data.reset_index(inplace=True, drop=True)
     return data
 
-def transform(data, n_features=500, vectorizer=None):
+def transform(data, max_features=500, vectorizer=None):
     if vectorizer==None:
-        vectorizer = TfidfVectorizer(max_features=n_features, use_idf=True)
+        vectorizer = TfidfVectorizer(max_features=max_features, use_idf=True)
         X = vectorizer.fit_transform(data)
     else:
         X = vectorizer.transform(data)
