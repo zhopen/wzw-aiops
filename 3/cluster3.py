@@ -124,7 +124,7 @@ def predict(args):
     json = args.json
     df = pd.read_json(json, lines=True)
     data = cleaning(df['log'].copy(), drop_duplicates=False)
-    X,_ = transform(data, n_features=FEATURES, vocabulary=model.vectorizer.vocabulary_)
+    X,_ = transform(data, n_features=FEATURES, vectorizer=model.vectorizer)
     labels = model.predict(X)
     label_log =  pd.DataFrame()
     label_log['label'] = labels
@@ -149,7 +149,7 @@ def predict_server(args):
         print (json_str)
         df = pd.read_json(json_str, lines=True)
         data = cleaning(df['log'].copy(), drop_duplicates=False)
-        X, _ = transform(data, n_features=FEATURES, vocabulary=model.vectorizer.vocabulary_)
+        X, _ = transform(data, n_features=FEATURES, vectorizer=model.vectorizer)
         print("***********")
         labels = model.predict(X)
         df["label"] = labels
@@ -177,9 +177,12 @@ def cleaning(data, drop_duplicates=True):
         data.reset_index(inplace=True, drop=True)
     return data
 
-def transform(data,n_features=500, vocabulary=None):
-    vectorizer = TfidfVectorizer(max_features=n_features, use_idf=True, vocabulary=vocabulary)
-    X = vectorizer.fit_transform(data)
+def transform(data, n_features=500, vectorizer=None):
+    if vectorizer==None:
+        vectorizer = TfidfVectorizer(max_features=n_features, use_idf=True)
+        X = vectorizer.fit_transform(data)
+    else:
+        X = vectorizer.transform(data)
     return X,vectorizer
 
 def train(X,k=10):
