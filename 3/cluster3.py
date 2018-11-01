@@ -167,7 +167,7 @@ def predict_server(args):
 def cleaning(data, drop_duplicates=True):
     '''
     Param:
-        df - pandas.serie
+        data - pandas.core.series.Series
     Return:
         pandas.DataFrame type
     '''
